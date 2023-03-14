@@ -457,10 +457,7 @@ final case class TableRowJsonIO(path: String) extends ScioIO[TableRow] {
       data.textOut(path, ".json", params.numShards, params.compression)
     )
     data.transform_("BigQuery write") {
-      _.map(ScioUtil.jsonFactory.toString)
-        .applyInternal(
-          write
-        )
+      _.map(ScioUtil.jsonFactory.toString).applyInternal(write)
     }
     tap(())
   }

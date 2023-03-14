@@ -43,10 +43,7 @@ import scala.reflect.ClassTag
 import scala.reflect.runtime.universe._
 
 /** Enhanced version of [[SCollection]] with BigQuery methods. */
-final class SCollectionTableRowOps[T <: TableRow](
-  private[bigquery] val self: SCollection[T],
-  private[bigquery] val typedMockIO: Option[BigQueryTypedTable[TableRow]] = None
-) {
+final class SCollectionTableRowOps[T <: TableRow](private[bigquery] val self: SCollection[T]) {
 
   /**
    * Save this SCollection as a BigQuery table. Note that elements must be of type
@@ -73,11 +70,7 @@ final class SCollectionTableRowOps[T <: TableRow](
 
     self
       .covary[TableRow]
-      .write(
-        typedMockIO.getOrElse(
-          BigQueryTypedTable(table, Format.TableRow)(coders.tableRowCoder)
-        )
-      )(param)
+      .write(BigQueryTypedTable(table, Format.TableRow)(coders.tableRowCoder))(param)
   }
 
   /**
@@ -96,10 +89,7 @@ final class SCollectionTableRowOps[T <: TableRow](
 }
 
 /** Enhanced version of [[SCollection]] with BigQuery methods */
-final class SCollectionGenericRecordOps[T <: GenericRecord](
-  private val self: SCollection[T],
-  private[bigquery] val mockIO: Option[BigQueryTypedTable[GenericRecord]] = None
-) {
+final class SCollectionGenericRecordOps[T <: GenericRecord](private val self: SCollection[T]) {
 
   /**
    * Save this SCollection as a BigQuery table using Avro writing function. Note that elements must
@@ -126,10 +116,8 @@ final class SCollectionGenericRecordOps[T <: GenericRecord](
     self
       .covary[GenericRecord]
       .write(
-        mockIO.getOrElse(
-          BigQueryTypedTable(table, Format.GenericRecord)(
-            self.coder.asInstanceOf[Coder[GenericRecord]]
-          )
+        BigQueryTypedTable(table, Format.GenericRecord)(
+          self.coder.asInstanceOf[Coder[GenericRecord]]
         )
       )(param)
   }
@@ -137,10 +125,7 @@ final class SCollectionGenericRecordOps[T <: GenericRecord](
 }
 
 /** Enhanced version of [[SCollection]] with BigQuery methods. */
-final class SCollectionTypedOps[T <: HasAnnotation](
-  private val self: SCollection[T],
-  private[bigquery] val mockedTypedTableIO: Option[BigQueryTypedTable[T]] = None
-) {
+final class SCollectionTypedOps[T <: HasAnnotation](private val self: SCollection[T]) {
 
   /**
    * Save this SCollection as a BigQuery table. Note that element type `T` must be annotated with
@@ -180,7 +165,7 @@ final class SCollectionTypedOps[T <: HasAnnotation](
   )(implicit tt: TypeTag[T], ct: ClassTag[T], coder: Coder[T]): ClosedTap[T] = {
     val param =
       TableWriteParam(writeDisposition, createDisposition, timePartitioning, configOverride)
-    self.write(BigQueryTyped.Table[T](table, mockedTypedTableIO))(param)
+    self.write(BigQueryTyped.Table[T](table))(param)
   }
 }
 

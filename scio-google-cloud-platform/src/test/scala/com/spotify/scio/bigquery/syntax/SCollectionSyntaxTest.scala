@@ -17,168 +17,84 @@
 
 package com.spotify.scio.bigquery.syntax
 
-import com.google.api.services.bigquery.model.{TableReference, TableSchema}
 import com.spotify.scio.ScioContext
-import com.spotify.scio.bigquery.{BigQueryType, BigQueryTypedTable, Table, TableRow}
-import com.spotify.scio.coders.Coder
-import com.spotify.scio.testing.PipelineSpec
-import com.spotify.scio.values.{SCollection, SCollectionImpl}
+import com.spotify.scio.bigquery._
+import com.spotify.scio.testing.{EqualNamePTransformMatcher, PipelineSpec, TransformFinder}
 import org.apache.avro.generic.GenericRecord
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO.Write
-import org.apache.beam.sdk.io.gcp.bigquery.mockUtils.mockedWriteResult
-import org.apache.beam.sdk.io.{Compression, TextIO}
-import org.apache.beam.sdk.values.{PCollection, PDone}
-import org.mockito.Mockito.lenient
-import org.mockito.scalatest.MockitoSugar
+import org.apache.beam.sdk.transforms.display.DisplayData
 
-class SCollectionSyntaxTest extends PipelineSpec with MockitoSugar {
+import scala.jdk.CollectionConverters._
 
-  "SCollectionTableRowOps" should "provide PTransform override on saveAsBigQueryTable" in {
-    // mock main data SCollection
-    val (_, sCollSpy, _) = mockPipe[TableRow]()
+object SCollectionSyntaxTest {
 
-    // create bqIO injecting a mocked beam PTransform
-    val (table, bqIO, beamWrite) = mockTypedWriteIO[TableRow]()
+  // BQ Write transform display id data for tableDescription
+  private val TableDescriptionId = DisplayData.Identifier.of(
+    DisplayData.Path.root(),
+    classOf[Write[_]],
+    "tableDescription"
+  )
 
-    /** test */
-    implicit def bigQuerySCollectionTableRowOps[T <: TableRow](sc: SCollection[T]) =
-      new SCollectionTableRowOps[T](sc, Option(bqIO))
+  @BigQueryType.toTable
+  case class BQRecord(i: Int, s: String, r: List[String])
+}
 
-    sCollSpy.saveAsBigQueryTable(
-      table = table,
-      configOverride = _.withTableDescription("table-description")
-    )
+class SCollectionSyntaxTest extends PipelineSpec {
 
-    /** verify */
-    verify(beamWrite).withTableDescription("table-description")
+  import SCollectionSyntaxTest._
 
-    /** after */
-    expectedBySpy(sCollSpy)
+  def testTableDescription(sc: ScioContext, bqWriteName: String): Unit = {
+    val finder = new TransformFinder(new EqualNamePTransformMatcher(bqWriteName))
+    sc.pipeline.traverseTopologically(finder)
+    val transforms = finder.result()
+    transforms should have size 1
+    val displayData = DisplayData.from(transforms.head).asMap().asScala
+    displayData.get(TableDescriptionId).map(_.getValue) shouldBe Some("table-description")
   }
 
-  "SCollectionTableRowOps" should "provide PTransform override on saveAsTableRowJsonFile" in {
-    val textIOWrite = mock[TextIO.Write]
+  "SCollectionTableRowOps" should "provide PTransform override on saveAsBigQueryTable" in {
+    val name = "saveAsBigQueryTable"
+    val sc = ScioContext()
+    sc
+      .empty[TableRow]
+      .withName(name)
+      .saveAsBigQueryTable(
+        Table.Spec("project:dataset.table"),
+        createDisposition = Write.CreateDisposition.CREATE_NEVER,
+        configOverride = _.withTableDescription("table-description")
+      )
 
-    // mock/spy
-    val (_, sCollSpy, _) = mockPipe[TableRow]()
-
-    doReturn(null).when(sCollSpy).transform_(any[String])(any[SCollection[TableRow] => PDone])
-    doReturn(textIOWrite).when(sCollSpy).textOut(any[String], any[String], anyInt, any[Compression])
-
-    /** test */
-    implicit def bigQuerySCollectionTableRowOps[T <: TableRow](sc: SCollection[T]) =
-      new SCollectionTableRowOps[T](sc)
-
-    sCollSpy.saveAsTableRowJsonFile("output-path", configOverride = _.withFooter("fooooter"))
-
-    /** verify */
-    verify(textIOWrite).withFooter("fooooter")
-
-    /** after */
-    expectedBySpy(sCollSpy)
+    testTableDescription(sc, name)
   }
 
   "SCollectionGenericRecordOps" should "provide PTransform override on saveAsBigQueryTable" in {
-    // mock main data SCollection
-    val (_, sCollSpy, _) = mockPipe[GenericRecord]()
+    val name = "saveAsBigQueryTable"
+    val sc = ScioContext()
+    sc
+      .empty[GenericRecord]
+      .withName("saveAsBigQueryTable")
+      .saveAsBigQueryTable(
+        Table.Spec("project:dataset.table"),
+        createDisposition = Write.CreateDisposition.CREATE_NEVER,
+        configOverride = _.withTableDescription("table-description")
+      )
 
-    // create bqIO injecting a mocked beam PTransform
-    val (table, bqIO, beamWrite) = mockTypedWriteIO[GenericRecord]()
-
-    /** test */
-    implicit def bigQuerySCollectionGenericRecordOps[T <: GenericRecord](
-      sc: SCollection[T]
-    ): SCollectionGenericRecordOps[T] =
-      new SCollectionGenericRecordOps[T](sc, Some(bqIO))
-
-    sCollSpy.saveAsBigQueryTable(
-      table = table,
-      configOverride = _.withTableDescription("table-description")
-    )
-
-    /** verify */
-    verify(beamWrite).withTableDescription("table-description")
-
-    /** after */
-    expectedBySpy(sCollSpy)
+    testTableDescription(sc, name)
   }
 
   "SCollectionTypedOps" should "provide PTransform override on saveAsTypedBigQueryTable" in {
-    import SCollectionSyntaxTest.BQRecord
+    val name = "saveAsTypedBigQueryTable"
+    val sc = ScioContext()
+    sc
+      .empty[BQRecord]
+      .withName(name)
+      .saveAsTypedBigQueryTable(
+        Table.Spec("project:dataset.table"),
+        createDisposition = Write.CreateDisposition.CREATE_NEVER,
+        configOverride = _.withTableDescription("table-description")
+      )
 
-    // mock/spy
-    val (_, sCollSpy, _) = mockPipe[BQRecord]()
-    doReturn("some-tfname").when(sCollSpy).tfName
-
-    // create bqIO injecting a mocked beam PTransform
-    val (table, bqIO, beamWrite) = mockTypedWriteIO[BQRecord]()
-    when(beamWrite.withSchema(any[TableSchema])).thenReturn(beamWrite)
-
-    /** test */
-    implicit def bigQuerySCollectionTypedOps(
-      sc: SCollection[BQRecord]
-    ): SCollectionTypedOps[BQRecord] =
-      new SCollectionTypedOps[BQRecord](sc, Option(bqIO))
-
-    sCollSpy.saveAsTypedBigQueryTable(table, configOverride = _.withKmsKey("SomeKmsKey"))
-
-    /** verify */
-    verify(beamWrite).withKmsKey("SomeKmsKey")
-
-    /** after */
-    expectedBySpy(sCollSpy)
+    // TODO why is name not respected here ?
+    testTableDescription(sc, s"${name}$$Write")
   }
-
-  private def mockTypedWriteIO[T: Coder](): (Table.Spec, BigQueryTypedTable[T], Write[T]) = {
-    val table = Table.Spec("project:dataset.dummy")
-    val beamWrite = mock[Write[T]]
-    when(beamWrite.to(any[TableReference])).thenReturn(beamWrite)
-    val bqIO = BigQueryTypedTable(null, beamWrite, table, null)
-    (table, bqIO, beamWrite)
-  }
-
-  private def mockPipe[T](
-    context: ScioContext = mock[ScioContext]
-  ): (ScioContext, SCollection[T], PCollection[T]) = {
-    when(context.isTest).thenReturn(false)
-    val (sCollSpy, pCollMock) = stubSCollection[T](context)
-    val (failuresSColl, failurePColl) = stubSCollection[TableRow](context)
-
-    // mocking away: com.spotify.scio.bigquery.Writes.WriteParamDefauls.defaultInsertErrorTransform
-    lenient().doReturn(failuresSColl).when(failuresSColl).withName("DropFailedInserts")
-    lenient().doReturn(null).when(failuresSColl).map(any[TableRow => Unit])(any[Coder[Unit]])
-
-    // mock BQ write transform
-    lenient()
-      .doReturn(mockedWriteResult(failedInserts = failurePColl))
-      .when(sCollSpy)
-      .applyInternal(any[Write[T]])
-
-    (context, sCollSpy, pCollMock)
-  }
-
-  private def stubSCollection[T](context: ScioContext): (SCollection[T], PCollection[T]) = {
-    val pColl = mock[PCollection[T]]
-    val sCollSpy = spy(new SCollectionImpl(pColl, context))
-
-    lenient().when(context.wrap(pColl)).thenReturn(sCollSpy)
-    lenient().doReturn(sCollSpy).when(sCollSpy).withName(any[String])
-    lenient().when(sCollSpy.context).thenReturn(context)
-    lenient().when(sCollSpy.covary[T]).thenReturn(sCollSpy)
-
-    (sCollSpy, pColl)
-  }
-
-  // TODO: lenient
-  def expectedBySpy[T](sCollSpy: SCollection[T]): Unit = {
-    // spy related
-    verify(sCollSpy, atLeast(1)).write(any[BigQueryTypedTable[T]])(
-      any[BigQueryTypedTable.WriteParam[T]]
-    )
-  }
-}
-
-object SCollectionSyntaxTest {
-  @BigQueryType.toTable
-  case class BQRecord(i: Int, s: String, r: List[String])
 }
